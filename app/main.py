@@ -6,7 +6,11 @@ from app.pdf_report import build_pdf_bytes, build_pdf_bytes_dynamic
 from app.mailer import send_mail
 from app.metadata import append_metadata_row
 from app.id_generator import next_complaint_id
-from app.dropbox_uploader import upload_pdf_to_dropbox
+
+
+
+def _as_bool(v: str) -> bool:
+    return str(v or "").strip().lower() in ("1", "true", "yes", "y", "on")
 
 
 def _get_value_from_sections(sections, wanted_labels):
@@ -35,6 +39,14 @@ def _derive_customer_email(submission) -> str:
 def main():
     try:
         print("[INFO] Starting pipeline...")
+
+        # Task 2 switches:
+        # - SEND_EMAIL=false -> skip sending email entirely
+        # - SEND_TO_CUSTOMER=false -> do not include customer email in recipients (lab emails still included)
+        send_email = _as_bool(os.environ.get("SEND_EMAIL", "true"))
+        send_to_customer = _as_bool(os.environ.get("SEND_TO_CUSTOMER", "true"))
+
+        print(f"[INFO] SEND_EMAIL={send_email} | SEND_TO_CUSTOMER={send_to_customer}")
 
         event = load_event()
         if isinstance(event, dict):
@@ -84,7 +96,7 @@ def main():
             f.write(pdf_bytes)
         print(f"[INFO] Wrote PDF to out/{filename}")
 
-        # Recipients (force lab + customer)
+        # Recipients
         lab_emails_raw = os.environ.get("LAB_EMAIL", "")
         lab_emails = [e.strip() for e in lab_emails_raw.split(",") if e.strip()]
 
@@ -92,11 +104,11 @@ def main():
 
         recipients = []
         recipients.extend(lab_emails)
-        
-        if customer_email and customer_email not in recipients:
+
+        if send_to_customer and customer_email and customer_email not in recipients:
             recipients.append(customer_email)
 
-
+        # Fallback to whatever the submission says if we still have nobody
         if not recipients:
             if isinstance(submission.email_to, list):
                 recipients = submission.email_to
@@ -108,19 +120,24 @@ def main():
         # Email (non-blocking)
         mail_ok = True
         mail_error = ""
-        try:
-            send_mail(
-                to=recipients,
-                subject=subject,
-                body=body,
-                attachment_bytes=pdf_bytes,
-                attachment_name=filename,
-            )
-            print("[INFO] Email sent OK")
-        except Exception as e:
-            mail_ok = False
-            mail_error = str(e)
-            print(f"[WARN] Email failed but continuing: {e}")
+        if send_email:
+            try:
+                send_mail(
+                    to=recipients,
+                    subject=subject,
+                    body=body,
+                    attachment_bytes=pdf_bytes,
+                    attachment_name=filename,
+                )
+                print("[INFO] Email sent OK")
+            except Exception as e:
+                mail_ok = False
+                mail_error = str(e)
+                print(f"[WARN] Email failed but continuing: {e}")
+        else:
+            print("[INFO] SEND_EMAIL=false, skipping email send.")
+            mail_ok = True
+            mail_error = ""
 
         # Dropbox (non-blocking)
         dropbox_path = ""
@@ -145,6 +162,8 @@ def main():
             "dropbox_ok": dropbox_ok,
             "dropbox_error": dropbox_error,
             "customer_email": customer_email,
+            "send_email": send_email,
+            "send_to_customer": send_to_customer,
         }
 
         append_metadata_row(

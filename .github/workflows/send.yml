@@ -13,8 +13,7 @@ concurrency:
 
 jobs:
   run:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
+    runs-on: self-hosted
 
     steps:
       - name: Checkout repo

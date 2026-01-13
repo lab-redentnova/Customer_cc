@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   run:
-    runs-on: self-hosted
+    runs-on: [self-hosted, windows, dropbox]
 
     steps:
       - name: Checkout repo

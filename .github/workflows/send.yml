@@ -90,6 +90,18 @@ jobs:
           name: complaint-pdf
           path: out/*.pdf
 
+      - name: Copy PDF to Dropbox Team Shared folder
+        shell: pwsh
+        env:
+          DROPBOX_TARGET: ${{ vars.DROPBOX_TARGET }}
+        run: |
+          $src = "out\*.pdf"
+          $dst = "$env:DROPBOX_TARGET"
+          if (!(Test-Path $dst)) { throw "Dropbox target folder not found: $dst" }
+          Copy-Item $src $dst -Force
+          Write-Host "Copied PDFs to $dst"
+
+
       - name: Commit metadata CSV
         run: |
           git config user.name "github-actions"

@@ -28,10 +28,12 @@ jobs:
         run: |
           git config --global --add safe.directory "$env:GITHUB_WORKSPACE"
 
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - name: Verify system Python
+        shell: pwsh
+        run: |
+          python --version
+          where python
+
 
       # Optional but helps speed up subsequent runs
       - name: Cache pip

@@ -14,6 +14,7 @@ concurrency:
 jobs:
   run:
     runs-on: [self-hosted, windows, dropbox]
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repo
@@ -21,27 +22,40 @@ jobs:
         with:
           fetch-depth: 0
 
+      # On some self-hosted Windows machines, Git can complain about "dubious ownership".
+      - name: Mark workspace as safe for Git
+        shell: pwsh
+        run: |
+          git config --global --add safe.directory "$env:GITHUB_WORKSPACE"
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+      # Optional but helps speed up subsequent runs
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~\AppData\Local\pip\Cache
+          key: pip-${{ runner.os }}-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            pip-${{ runner.os }}-
+
       - name: Install dependencies
+        shell: pwsh
         run: |
           python -m pip install --upgrade pip
           python -m pip install -r requirements.txt
           python -c "import sys; print(sys.executable); print(sys.version)"
-          
-
-
-      - name: Sync with latest main
-        run: |
-          git pull --rebase
 
       - name: Execute pipeline
+        shell: pwsh
         env:
           SEND_EMAIL: ${{ vars.SEND_EMAIL }}
           SEND_TO_CUSTOMER: ${{ vars.SEND_TO_CUSTOMER }}
+
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_USER: ${{ secrets.SMTP_USER }}
@@ -49,63 +63,64 @@ jobs:
           SMTP_FROM: ${{ secrets.SMTP_FROM }}
           SMTP_USE_SSL: ${{ secrets.SMTP_USE_SSL }}
           SMTP_USE_STARTTLS: ${{ secrets.SMTP_USE_STARTTLS }}
-      
+
           LAB_EMAIL: ${{ secrets.LAB_EMAIL }}
-      
-          
-      
+
+          # Nice-to-have in your metadata
+          GITHUB_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          set -euxo pipefail
-          pwd
-          ls -la
-        
-          echo "=== running app.main ==="
-          python -m app.main
-        
-          echo "=== after app.main ==="
-          echo "=== out folder ==="
-          find . -maxdepth 2 -type d -print
-          ls -la out || true
-          find out -maxdepth 1 -type f -print || true
-        
-          echo "=== data folder ==="
-          ls -la data || true
-        
-          # fail if no pdf was generated
-          test -n "$(ls -1 out/*.pdf 2>/dev/null | head -n 1)"
-        
-              
+          python app/main.py
+
+          # Fail if no PDF was generated
+          if (-not (Test-Path "out")) { throw "out/ folder not found" }
+          $pdfs = Get-ChildItem -Path "out" -Filter *.pdf -ErrorAction SilentlyContinue
+          if ($null -eq $pdfs -or $pdfs.Count -lt 1) { throw "No PDF generated in out/*.pdf" }
 
       - name: Upload generated PDF (artifact)
         uses: actions/upload-artifact@v4
         with:
-          name: generated-pdf
-          path: out/*.pdf
-          if-no-files-found: error
-
-
-      - name: Upload generated PDF as artifact
-        uses: actions/upload-artifact@v4
-        with:
           name: complaint-pdf
           path: out/*.pdf
+          if-no-files-found: error
 
       - name: Copy PDF to Dropbox Team Shared folder
         shell: pwsh
         env:
           DROPBOX_TARGET: ${{ vars.DROPBOX_TARGET }}
         run: |
-          $src = "out\*.pdf"
-          $dst = "$env:DROPBOX_TARGET"
-          if (!(Test-Path $dst)) { throw "Dropbox target folder not found: $dst" }
-          Copy-Item $src $dst -Force
-          Write-Host "Copied PDFs to $dst"
+          if ([string]::IsNullOrWhiteSpace($env:DROPBOX_TARGET)) {
+            throw "DROPBOX_TARGET GitHub Variable is not set"
+          }
+          if (!(Test-Path $env:DROPBOX_TARGET)) {
+            throw "Dropbox target folder not found: $env:DROPBOX_TARGET"
+          }
 
+          $src = Get-ChildItem -Path "out" -Filter *.pdf
+          Copy-Item $src.FullName $env:DROPBOX_TARGET -Force
+
+          Write-Host "Copied PDF(s) to Dropbox target: $env:DROPBOX_TARGET"
+          Get-ChildItem $env:DROPBOX_TARGET | Sort-Object LastWriteTime -Descending | Select-Object -First 5 | Format-Table
 
       - name: Commit metadata CSV
+        shell: pwsh
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-          git add data/complaints_metadata.csv || true
-          git diff --cached --quiet || git commit -m "Append complaint metadata (CSV)"
+
+          # Add only the metadata file; ignore if it doesn't exist yet
+          if (Test-Path "data/complaints_metadata.csv") {
+            git add data/complaints_metadata.csv
+          } else {
+            Write-Host "No data/complaints_metadata.csv found to commit (skipping)."
+            exit 0
+          }
+
+          # Commit only if there are changes
+          git diff --cached --quiet
+          if ($LASTEXITCODE -eq 0) {
+            Write-Host "No metadata changes to commit."
+            exit 0
+          }
+
+          git commit -m "Append complaint metadata (CSV)"
           git push

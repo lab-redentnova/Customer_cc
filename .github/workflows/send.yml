@@ -84,6 +84,19 @@ jobs:
           Write-Host "Copied PDF(s) to Dropbox target: $env:DROPBOX_TARGET"
           Get-ChildItem $env:DROPBOX_TARGET | Sort-Object LastWriteTime -Descending | Select-Object -First 5 | Format-Table
 
+          
+      - name: Commit metadata CSV
+        
+        run: |
+          git config user.name "github-actions"
+          git config user.email "github-actions@github.com"
+      
+          git pull --rebase origin main
+      
+          git add data/complaints_metadata.csv || true
+          git diff --cached --quiet || git commit -m "Append complaint metadata (CSV)"
+          git push origin main
+
       - name: Commit metadata CSV
         shell: powershell
         run: |

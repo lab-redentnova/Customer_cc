@@ -86,23 +86,13 @@ jobs:
 
           
       - name: Commit metadata CSV
-        
+        shell: powershell
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
       
           git pull --rebase origin main
       
-          git add data/complaints_metadata.csv || true
-          git diff --cached --quiet || git commit -m "Append complaint metadata (CSV)"
-          git push origin main
-
-      - name: Commit metadata CSV
-        shell: powershell
-        run: |
-          git config user.name "github-actions"
-          git config user.email "github-actions@github.com"
-
           # Add only the metadata file; ignore if it doesn't exist yet
           if (Test-Path "data/complaints_metadata.csv") {
             git add data/complaints_metadata.csv
@@ -110,13 +100,14 @@ jobs:
             Write-Host "No data/complaints_metadata.csv found to commit (skipping)."
             exit 0
           }
-
+      
           # Commit only if there are changes
           git diff --cached --quiet
           if ($LASTEXITCODE -eq 0) {
             Write-Host "No metadata changes to commit."
             exit 0
           }
-
+      
           git commit -m "Append complaint metadata (CSV)"
-          git push
+          git push origin main
+

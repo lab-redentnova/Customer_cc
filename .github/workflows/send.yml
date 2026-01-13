@@ -22,11 +22,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      # On some self-hosted Windows machines, Git can complain about "dubious ownership".
-      - name: Mark workspace as safe for Git
-        shell: pwsh
-        run: |
-          git config --global --add safe.directory "$env:GITHUB_WORKSPACE"
+      
 
       - name: Verify system Python
         shell: pwsh

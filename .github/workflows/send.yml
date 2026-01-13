@@ -91,9 +91,16 @@ jobs:
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
       
+          # If the workflow already modified files (CSV), stash them so rebase can work
+          git stash push -u -m "ci-stash" | Out-Null
+      
+          # Rebase onto latest main
           git pull --rebase origin main
       
-          # Add only the metadata file; ignore if it doesn't exist yet
+          # Restore changes (CSV updates)
+          git stash pop | Out-Null
+      
+          # Add only the metadata file
           if (Test-Path "data/complaints_metadata.csv") {
             git add data/complaints_metadata.csv
           } else {

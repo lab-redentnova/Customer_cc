@@ -39,8 +39,8 @@ jobs:
       - name: Execute pipeline
         shell: powershell
         env:
-          SEND_EMAIL: ${{ vars.SEND_EMAIL }}
-          SEND_TO_CUSTOMER: ${{ vars.SEND_TO_CUSTOMER }}
+          SEND_EMAIL: ${{ secrets.SEND_EMAIL }}
+          SEND_TO_CUSTOMER: ${{ secrets.SEND_TO_CUSTOMER }}
           SMTP_HOST: ${{ secrets.SMTP_HOST }}
           SMTP_PORT: ${{ secrets.SMTP_PORT }}
           SMTP_USER: ${{ secrets.SMTP_USER }}

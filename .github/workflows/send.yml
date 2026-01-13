@@ -27,14 +27,19 @@ jobs:
         run: |
           git config --global --add safe.directory "$env:GITHUB_WORKSPACE"
 
-
-      - name: Verify system Python
+      - name: Resolve system Python (version-agnostic)
         shell: powershell
         run: |
-          python --version
-          where python
+          ./scripts/resolve_python.ps1
 
-
+      - name: Install dependencies
+        shell: powershell
+        run: |
+          # Use the resolved python command (could be: "py -3" or full path)
+          $py = $env:PYTHON_CMD.Split(' ')
+          & $py -m pip --version
+          & $py -m pip install --upgrade pip
+          & $py -m pip install -r requirements.txt
 
       - name: Execute pipeline
         shell: powershell
@@ -51,13 +56,12 @@ jobs:
           LAB_EMAIL: ${{ secrets.LAB_EMAIL }}
           GITHUB_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          python -m app.main
-      
+          $py = $env:PYTHON_CMD.Split(' ')
+          & $py -m app.main
+
           if (-not (Test-Path "out")) { throw "out/ folder not found" }
           $pdfs = Get-ChildItem -Path "out" -Filter *.pdf -ErrorAction SilentlyContinue
           if ($null -eq $pdfs -or $pdfs.Count -lt 1) { throw "No PDF generated in out/*.pdf" }
-
-
 
       - name: Upload generated PDF (artifact)
         uses: actions/upload-artifact@v4
@@ -84,22 +88,21 @@ jobs:
           Write-Host "Copied PDF(s) to Dropbox target: $env:DROPBOX_TARGET"
           Get-ChildItem $env:DROPBOX_TARGET | Sort-Object LastWriteTime -Descending | Select-Object -First 5 | Format-Table
 
-          
       - name: Commit metadata CSV
         shell: powershell
         run: |
           git config user.name "github-actions"
           git config user.email "github-actions@github.com"
-      
+
           # If the workflow already modified files (CSV), stash them so rebase can work
           git stash push -u -m "ci-stash" | Out-Null
-      
+
           # Rebase onto latest main
           git pull --rebase origin main
-      
+
           # Restore changes (CSV updates)
           git stash pop | Out-Null
-      
+
           # Add only the metadata file
           if (Test-Path "data/complaints_metadata.csv") {
             git add data/complaints_metadata.csv
@@ -107,14 +110,13 @@ jobs:
             Write-Host "No data/complaints_metadata.csv found to commit (skipping)."
             exit 0
           }
-      
+
           # Commit only if there are changes
           git diff --cached --quiet
           if ($LASTEXITCODE -eq 0) {
             Write-Host "No metadata changes to commit."
             exit 0
           }
-      
+
           git commit -m "Append complaint metadata (CSV)"
           git push origin main
-

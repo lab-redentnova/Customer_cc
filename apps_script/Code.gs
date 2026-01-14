@@ -1,4 +1,4 @@
-const INTERNAL_RECIPIENT = "lab@redentnova.de";
+const INTERNAL_RECIPIENT = ["lab@redentnova.de","raz.flieshman@redentnova.de","emilin.varkey@redentnova.de","johannes.meyer-kobbe@redentnova.de","zeev.schreiber@redentnova.de"];
 
 function onFormSubmit(e) {
   const form = FormApp.getActiveForm();
@@ -151,3 +151,22 @@ function buildComplaintId_() {
   const mm = String(now.getMinutes()).padStart(2, "0");
   return `RN-${y}${m}${d}-${hh}${mm}`;
 }
+
+function debugTriggerLastResponse() {
+  var form = FormApp.getActiveForm();
+  var responses = form.getResponses();
+
+  if (responses.length === 0) {
+    throw new Error("No responses found.");
+  }
+
+  var lastResponse = responses[responses.length - 1];
+
+  // This matches the real form submit trigger shape
+  var e = {
+    response: lastResponse
+  };
+
+  onFormSubmit(e);
+}
+

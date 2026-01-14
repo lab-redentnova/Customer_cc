@@ -32,14 +32,25 @@ jobs:
         run: |
           ./scripts/resolve_python.ps1
 
+      - name: Python diagnostics
+        shell: powershell
+        run: |
+          Write-Host "PYTHON_EXE=$env:PYTHON_EXE"
+          & "$env:PYTHON_EXE" --version
+          & "$env:PYTHON_EXE" -c "import sys; print(sys.executable)"
+
       - name: Install dependencies
         shell: powershell
         run: |
-          # Use the resolved python command (could be: "py -3" or full path)
-          $py = $env:PYTHON_CMD.Split(' ')
-          & $py -m pip --version
-          & $py -m pip install --upgrade pip
-          & $py -m pip install -r requirements.txt
+          if ([string]::IsNullOrWhiteSpace($env:PYTHON_EXE)) {
+            throw "PYTHON_EXE not set. resolve_python.ps1 did not export it."
+          }
+
+          & "$env:PYTHON_EXE" -m pip --version
+          & "$env:PYTHON_EXE" -m pip install --upgrade pip
+          & "$env:PYTHON_EXE" -m pip install -r requirements.txt
+
+
 
       - name: Execute pipeline
         shell: powershell

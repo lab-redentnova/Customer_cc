@@ -67,7 +67,7 @@ jobs:
           LAB_EMAIL: ${{ secrets.LAB_EMAIL }}
           GITHUB_RUN_URL: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
-          "$env:PYTHON_EXE" -m app.main
+          & "$env:PYTHON_EXE" -m app.main
 
           if (-not (Test-Path "out")) { throw "out/ folder not found" }
           $pdfs = Get-ChildItem -Path "out" -Filter *.pdf -ErrorAction SilentlyContinue

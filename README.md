@@ -111,12 +111,4 @@ At a high level:
   - `REPO_NAME`
 - Create an installable trigger for `onFormSubmit`
 
-## Notes / current limitations
 
-- **Dropbox upload**: `app/main.py` calls `upload_pdf_to_dropbox(...)`, but this repository does not currently include its implementation. If your deployment depends on Dropbox uploads, add an implementation module/function or wire in the missing dependency (see `TODOS.md`).
-
-## Troubleshooting
-
-- **“GITHUB_EVENT_PATH is missing…”**: set `GITHUB_EVENT_PATH` to a real event JSON file path.
-- **Email fails but pipeline continues**: email is intentionally non-blocking; check SMTP env vars and credentials.
-- **Complaint ID increments**: `app/id_generator.py` currently uses `data/complaints_metadata.csv` to determine the next sequence for the year.

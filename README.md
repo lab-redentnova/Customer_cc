@@ -1,290 +1,122 @@
 # Customer Complaint Automation Pipeline
 
-## Overview
+Automates the processing of **Google Forms customer complaints** by generating a branded PDF report, optionally emailing it, and writing an audit trail of each complaint for downstream systems.
 
-This repository implements an automated pipeline for processing customer complaints submitted via Google Forms.
+## Overview
 
 **End-to-end flow**
 
-Google Form
-→ Google Sheet
-→ Google Apps Script (on-submit trigger)
-→ GitHub `repository_dispatch`
-→ GitHub Actions (self-hosted Windows runner)
-→ Python generates PDF (ReportLab)
-→ PDF copied to Dropbox Team Shared Folder
-→ CSV metadata updated and committed to repo
-→ Optional email notification (SMTP)
+Google Form → Google Sheet → Google Apps Script trigger → GitHub `repository_dispatch` → GitHub Actions (self-hosted runner) → Python pipeline
 
-The pipeline runs without cloud servers and uses a self-hosted GitHub Actions runner on a Windows machine with Dropbox Desktop installed.
+The Python pipeline:
+- Generates a PDF (ReportLab) into `out/`
+- sends email via SMTP
+- Appends metadata to:
+  - `data/complaints_metadata.csv` (versioned audit log)
+  - `data/complaints_metadata.db` (SQLite, for real-time querying / use by other projects)
 
----
+## Repository layout
 
-## Why this setup
+- **`app/main.py`**: Orchestrates the pipeline (parse payload → generate PDF → email → metadata)
+- **`app/payload.py`**: Parses the GitHub event payload into a normalized `Submission`
+- **`app/pdf_report.py`**: PDF generation (dynamic section/row layout + a legacy fallback renderer)
+- **`app/mailer.py`**: SMTP email sending
+- **`app/metadata.py`**: Writes the audit record (CSV + SQLite)
+- **`app/db_metadata.py`**: SQLite schema + insert helper
+- **`apps_script/Code.gs`**: Google Apps Script that sends `repository_dispatch` to GitHub
+- **`data/`**: Audit logs (`complaints_metadata.csv`, `complaints_metadata.db`)
+- **`scripts/`**: Local run helpers + Windows runner helper
+- **`logo.png`**: Used in the PDF header
 
-* No always-on cloud infrastructure
-* No paid backend services
-* Works with company Dropbox Team folders
-* No Dropbox API, OAuth, or tokens
-* Compatible with corporate Windows restrictions
-* Designed for low-volume, business-critical workflows
+## How the payload works
 
----
+The pipeline is designed to be resilient to Google Form changes.
+- The Apps Script builds a **sections/rows** structure dynamically from the current form (see `apps_script/Code.gs`).
+- The Python side renders those sections directly into the PDF (see `app/pdf_report.py`).
 
-## Architecture
+Expected GitHub event shape (simplified):
+- `event.client_payload.submission_id`
+- `event.client_payload.complaint_id`
+- `event.client_payload.submission_timestamp`
+- `event.client_payload.email_to`
+- `event.client_payload.sections` (preferred)
 
-* **Trigger**: Google Form submission
-* **Event transport**: GitHub `repository_dispatch`
-* **Execution**: Self-hosted GitHub Actions runner (Windows)
-* **Processing**: Python (ReportLab PDF generation)
-* **Storage**: Dropbox Desktop (Team Shared Folder)
-* **Audit log**: `data/complaints_metadata.csv` updated and committed
-* **Notifications**: SMTP email (toggleable)
-* **Runner startup**: Windows Task Scheduler
+## Running locally (developer workflow)
 
----
+This repo runs from the GitHub Actions event payload file (`GITHUB_EVENT_PATH`). To run locally, you typically create a local JSON event file and point `GITHUB_EVENT_PATH` at it.
 
-## 1. Google Form & Google Sheet
-
-1. Create a Google Form for customer complaints
-2. Link responses to a Google Sheet
-   (Responses tab → Link to Sheets)
-
----
-
-## 2. Google Apps Script
-
-1. In the linked Google Sheet:
-
-   * Extensions → Apps Script
-2. Paste the script from:
-
-   ```
-   apps_script/Code.gs
-   ```
-3. Set Script Property:
-
-   * `GITHUB_PAT` (GitHub Personal Access Token)
-4. Add an installable trigger:
-
-   * Function: `onFormSubmit`
-   * Event source: From spreadsheet
-   * Event type: On form submit
-
-This script sends a `repository_dispatch` event to GitHub on every form submission.
-
----
-
-## 3. GitHub Workflow Trigger
-
-The workflow is triggered using:
-
-```yaml
-on:
-  repository_dispatch:
-    types: [complaint_submitted]
-```
-
-The workflow file must exist on the repository’s default branch.
-
----
-
-## 4. Self-Hosted GitHub Actions Runner
-
-### Why self-hosted
-
-GitHub-hosted runners cannot:
-
-* Access Dropbox Desktop
-* Access company file systems
-
-This pipeline requires:
-
-* A Windows self-hosted runner
-* Dropbox Desktop installed and signed in
-* Access to the Team Shared Folder
-
-Runner labels used:
+**Windows (PowerShell / cmd):**
 
 ```
-self-hosted, windows, dropbox
+set GITHUB_EVENT_PATH=sample_event.json
+scripts\run_local.bat
 ```
 
----
-
-## 5. Runner Startup (Task Scheduler)
-
-The Windows user account does not use a password or PIN, so the runner cannot be installed as a Windows service.
-
-Instead, the runner is started using **Windows Task Scheduler**.
-
-### Task Scheduler configuration
-
-* Trigger: At user logon
-* Run only when user is logged on
-* Run with highest privileges
-* Action:
-
-  ```
-  cmd.exe /c C:\actions-runner\run.cmd
-  ```
-* Start in:
-
-  ```
-  C:\actions-runner
-  ```
-
-This ensures the runner stays online even if PowerShell windows are closed.
-
----
-
-## 6. Dropbox Integration
-
-This pipeline does **not** use the Dropbox API.
-
-* Dropbox Desktop syncs the Team Shared Folder locally
-* PDFs are copied using filesystem operations
-* Dropbox handles syncing automatically
-
-Example target path:
+**Linux/macOS:**
 
 ```
-C:\Users\User\Redent Dropbox\Redent Team Folder\Customer Complaints
+export GITHUB_EVENT_PATH=sample_event.json
+scripts/run_local.sh
 ```
 
-The target folder path is configured through `DROPBOX_TARGET`.
+Output:
+- PDF: `out/<complaint_id>.pdf`
+- CSV log: `data/complaints_metadata.csv`
+- SQLite DB: `data/complaints_metadata.db`
 
----
+## Configuration (environment variables)
 
-## 7. Metadata CSV (Audit Log)
+### Email toggles
+- **`SEND_EMAIL`**: `true` / `false` (default: `true`)
+- **`SEND_TO_CUSTOMER`**: `true` / `false` (default: `true`)
 
-Each complaint submission appends/updates an audit record in:
+### SMTP settings (required only if `SEND_EMAIL=true`)
+> Note: in code, the password variable name is **`SMTP_PASSWORD`** (not `SMTP_PASS`).
+
+- **`SMTP_HOST`**
+- **`SMTP_PORT`** (default: `587`)
+- **`SMTP_USER`**
+- **`SMTP_PASSWORD`**
+- **`SMTP_FROM`** (falls back to `SMTP_USER` if omitted)
+- **`SMTP_USE_SSL`**: `true` / `false` (default: `false`)
+- **`SMTP_USE_STARTTLS`**: `true` / `false` (default: `true`)
+- **`LAB_EMAIL`**: comma-separated list used by the pipeline (and also used in `app/payload.py` as a fallback)
+
+### PDF branding
+- **`DOC_VERSION`**: footer text (default: `ReDent Nova GmbH • Customer Complaint Form`)
+- **`MAIL_SUBJECT`**, **`MAIL_BODY`**: optional email subject/body overrides
+
+## Metadata storage
+
+Each run writes an audit record containing IDs, timestamps, email/dropbox status flags, links, and a JSON blob of all raw fields.
+
+- **CSV**: `data/complaints_metadata.csv`
+- **SQLite**: `data/complaints_metadata.db`, table **`complaints_metadata`**
+
+### Querying the SQLite DB (example)
 
 ```
-data/complaints_metadata.csv
+sqlite3 data/complaints_metadata.db "SELECT complaint_id, created_at_utc, customer_email FROM complaints_metadata ORDER BY id DESC LIMIT 5;"
 ```
 
-The workflow commits this file back to the repository so you always have a versioned log of:
+## Google Apps Script setup
 
-* Submission timestamp / ID
-* Customer / complaint identifiers included in payload
-* Generated PDF filename
-* GitHub run URL or run ID (if enabled)
+See **`apps_script/SETUP.md`** for the exact steps.
 
-If there are no changes in the CSV, the commit step is skipped.
+At a high level:
+- Paste `apps_script/Code.gs` into the linked Google Sheet’s Apps Script project
+- Add Script Properties:
+  - `GITHUB_PAT`
+  - `REPO_OWNER`
+  - `REPO_NAME`
+- Create an installable trigger for `onFormSubmit`
 
----
+## Notes / current limitations
 
-## 8. Email Notifications (SMTP)
+- **Dropbox upload**: `app/main.py` calls `upload_pdf_to_dropbox(...)`, but this repository does not currently include its implementation. If your deployment depends on Dropbox uploads, add an implementation module/function or wire in the missing dependency (see `TODOS.md`).
 
-Email sending is supported via SMTP (for example SMTP2GO or any SMTP provider).
+## Troubleshooting
 
-### Toggle behavior (no code changes)
-
-Use GitHub Variables:
-
-* `SEND_EMAIL`
-* `SEND_TO_CUSTOMER`
-
-Typical settings:
-
-* Testing mode:
-
-  * `SEND_EMAIL=false`
-  * `SEND_TO_CUSTOMER=false`
-* Production mode:
-
-  * `SEND_EMAIL=true`
-  * `SEND_TO_CUSTOMER=true`
-
-### Required SMTP Secrets
-
-Configured under:
-`Settings → Secrets and variables → Actions`
-
-* `SMTP_HOST`
-* `SMTP_PORT`
-* `SMTP_USER`
-* `SMTP_PASS`
-* `SMTP_FROM`
-
-Optional (depending on your implementation):
-
-* `SMTP_USE_SSL`
-* `SMTP_USE_STARTTLS`
-* `LAB_EMAIL`
-
----
-
-## 9. GitHub Secrets and Variables
-
-### Variables
-
-* `DROPBOX_TARGET`
-  Absolute local path to the Dropbox Team folder on the runner machine
-
-* `SEND_EMAIL`
-  `true` or `false`
-
-* `SEND_TO_CUSTOMER`
-  `true` or `false`
-
-### Secrets
-
-* `SMTP_HOST`
-* `SMTP_PORT`
-* `SMTP_USER`
-* `SMTP_PASS`
-* `SMTP_FROM`
-* Optional: `SMTP_USE_SSL`, `SMTP_USE_STARTTLS`, `LAB_EMAIL`
-
----
-
-## 10. Testing
-
-1. Log into the runner machine
-2. Ensure Dropbox Desktop is running
-3. Verify runner status in GitHub (Idle)
-4. Set variables for testing:
-
-   * `SEND_EMAIL=false`
-   * `SEND_TO_CUSTOMER=false`
-5. Submit the Google Form
-6. Confirm:
-
-   * GitHub Actions run succeeds
-   * PDF is generated in `out/*.pdf`
-   * PDF appears in Dropbox Team folder
-   * `data/complaints_metadata.csv` is updated/committed
-   * No email is sent (in testing mode)
-
----
-
-## Local Development (Optional)
-
-1. Copy:
-
-   * `.env.example` → `.env`
-2. Fill required values
-3. Run locally:
-
-   * Windows:
-
-     ```
-     scripts/run_local.bat
-     ```
-   * Linux/macOS:
-
-     ```
-     scripts/run_local.sh
-     ```
-
----
-
-## Maintainer Notes
-
-* The runner machine is part of the system
-* Dropbox Desktop availability is critical
-* Logging out stops the runner (Task Scheduler starts runner at logon)
-* Keep Python and Git updated periodically
-* If emails are enabled, validate SMTP credentials and sender policy
+- **“GITHUB_EVENT_PATH is missing…”**: set `GITHUB_EVENT_PATH` to a real event JSON file path.
+- **Email fails but pipeline continues**: email is intentionally non-blocking; check SMTP env vars and credentials.
+- **Complaint ID increments**: `app/id_generator.py` currently uses `data/complaints_metadata.csv` to determine the next sequence for the year.
